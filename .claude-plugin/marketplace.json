@@ -1,0 +1,15 @@
+{
+  "name": "auto-tldr",
+  "description": "The Auto TLDR plugin for Claude Code.",
+  "owner": {
+    "name": "gruckion"
+  },
+  "plugins": [
+    {
+      "name": "auto-tldr",
+      "source": "./",
+      "description": "Automatic, self-contained summaries in the same conversation.",
+      "version": "1.0.2"
+    }
+  ]
+}

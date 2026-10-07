@@ -1,0 +1,33 @@
+name: Bug report
+description: Report an Auto TLDR problem.
+body:
+  - type: textarea
+    id: behavior
+    attributes:
+      label: What happened?
+      description: Include what you expected and steps to reproduce. Do not paste private conversations or secrets.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Claude Code version
+      description: Run claude --version in the terminal or /status in Desktop.
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where are you using it?
+      options:
+        - Terminal
+        - Desktop Code tab
+        - Remote Control
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Plugin version and other relevant details
+      description: Include whether other hooks or plugins could affect prompts. Redact sensitive data.

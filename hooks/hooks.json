@@ -1,0 +1,4 @@
+{
+  "description": "Request one standalone summary after each normal answer",
+  "modules": ["./register.js"]
+}

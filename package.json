@@ -1,0 +1,23 @@
+{
+  "name": "auto-tldr",
+  "version": "1.0.2",
+  "private": true,
+  "type": "module",
+  "description": "Development tools for the Auto TLDR Claude Code plugin",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "check": "bun run format:check && bun run test",
+    "validate:plugin": "claude plugin validate --strict .claude-plugin/plugin.json",
+    "validate:marketplace": "claude plugin validate --strict .claude-plugin/marketplace.json"
+  },
+  "devDependencies": {
+    "prettier": "3.9.9"
+  },
+  "packageManager": "bun@1.4.2"
+}

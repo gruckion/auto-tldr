@@ -1,0 +1,13 @@
+{
+  "name": "auto-tldr",
+  "version": "1.0.2",
+  "description": "Automatically request a separate, self-contained TLDR after Claude Code answers.",
+  "author": {
+    "name": "gruckion",
+    "url": "https://github.com/gruckion"
+  },
+  "homepage": "https://github.com/gruckion/auto-tldr",
+  "repository": "https://github.com/gruckion/auto-tldr",
+  "license": "MIT",
+  "keywords": ["tldr", "summary", "accessibility", "read-aloud"]
+}
