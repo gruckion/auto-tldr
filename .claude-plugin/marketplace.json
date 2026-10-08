@@ -9,7 +9,7 @@
       "name": "auto-tldr",
       "source": "./",
       "description": "Automatic, self-contained summaries in the same conversation.",
-      "version": "1.0.2"
+      "version": "1.1.0"
     }
   ]
 }

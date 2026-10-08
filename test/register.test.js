@@ -7,14 +7,44 @@ const summaryPrompt =
 
 // Exercise the real exported hooks. This fixture provides only the host effects
 // they use; Claude's queue, model, and UI are verified separately in a live run.
-function session({ rejectSubmission = false } = {}) {
+function session({ rejectSubmission = false, envText, fetchResponse } = {}) {
   const handlers = new Map();
   const timers = [];
   const prompts = [];
   const logs = [];
+  const requests = [];
   register((name, handler) => handlers.set(name, handler));
   const api = {
-    clock: { after: (_, callback) => timers.push(callback) },
+    clock: {
+      after: (delay, callback) => {
+        const timer = { delay, callback, cancelled: false };
+        timers.push(timer);
+        return {
+          cancel: () => {
+            timer.cancelled = true;
+          },
+        };
+      },
+    },
+    env: { get: async (name) => (name === "HOME" ? "/home/test" : undefined) },
+    fs: {
+      exists: async () => envText !== undefined,
+      read: async () => envText,
+    },
+    http: {
+      fetch: async (url, options) => {
+        requests.push({ url, ...options });
+        return fetchResponse
+          ? fetchResponse()
+          : {
+              ok: true,
+              status: 200,
+              text: JSON.stringify({
+                answers: { summarize: { type: "noul", noul: 0.1 } },
+              }),
+            };
+      },
+    },
     prompt: {
       submit: async (prompt) => {
         if (rejectSubmission) throw new Error("Session closed");
@@ -31,7 +61,16 @@ function session({ rejectSubmission = false } = {}) {
   return {
     prompts,
     logs,
+    requests,
     emit,
+    expire: () => {
+      for (const timer of timers) {
+        if (!timer.cancelled && timer.delay > 0) {
+          timer.cancelled = true;
+          timer.callback();
+        }
+      }
+    },
     start: (turnId, text = "Explain the change") =>
       emit("turn.start", { turnId, text }),
     complete: (turnId, fields = {}) =>
@@ -43,7 +82,9 @@ function session({ rejectSubmission = false } = {}) {
         ...fields,
       }),
     flush: async () => {
-      for (const callback of timers.splice(0)) await callback();
+      for (const timer of timers.splice(0)) {
+        if (!timer.cancelled && timer.delay === 0) await timer.callback();
+      }
     },
   };
 }
@@ -182,4 +223,129 @@ test("a failed submission is reported without an automatic retry loop", async ()
   await s.complete("answer");
   await s.flush();
   assert.equal(s.logs.length, 1);
+});
+
+test("Jev skips a short self-contained reply instead of automatically asking for a redundant summary", async () => {
+  const s = session({
+    envText: "TYPESAFE_API_KEY=test-key\nTYPESAFE_MODEL=jev-latest\n",
+  });
+  await s.start("links", "Link to the PRs");
+  await s.complete("links", {
+    answer:
+      "Both PRs contain the video under Demo: backend PR #12 and frontend PR #13.",
+  });
+  await s.flush();
+  assert.equal(s.prompts.length, 0);
+  assert.equal(s.requests.length, 1);
+  const body = JSON.parse(s.requests[0].body);
+  assert.equal(
+    body.state.answer,
+    "Both PRs contain the video under Demo: backend PR #12 and frontend PR #13.",
+  );
+  assert.equal(s.requests[0].url, "https://api.typesafe.ai/v1/systemone");
+  assert.equal(s.requests[0].headers.Authorization, "Bearer test-key");
+});
+
+test("Jev permits a useful summary but a later user prompt cancels a delayed positive verdict", async () => {
+  for (const newerInput of [false, true]) {
+    let finish;
+    const s = session({
+      envText: "TYPESAFE_API_KEY='test-key'",
+      fetchResponse: () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    });
+    await s.start("answer");
+    await s.complete("answer");
+    const pending = s.flush();
+    for (let i = 0; !finish && i < 20; i++)
+      await new Promise((resolve) => setImmediate(resolve));
+    assert.ok(finish, "Jev should be called before a follow-up");
+    if (newerInput) await s.emit("prompt.submit", { text: "New work" });
+    finish({
+      ok: true,
+      status: 200,
+      text: JSON.stringify({
+        answers: { summarize: { type: "noul", noul: 0.95 } },
+      }),
+    });
+    await pending;
+    assert.equal(s.prompts.length, newerInput ? 0 : 1);
+  }
+});
+
+test("configured Jev fails closed for missing keys, HTTP failure, invalid responses and uncertain verdicts", async () => {
+  const cases = [
+    { envText: "TYPESAFE_MODEL=jev-latest" },
+    {
+      fetchResponse: async () => ({
+        ok: false,
+        status: 401,
+        text: "secret server details",
+      }),
+    },
+    {
+      fetchResponse: async () => ({ ok: true, status: 200, text: "not JSON" }),
+    },
+    ...[null, "0.9", -1, 2, 0.69].map((noul) => ({
+      fetchResponse: async () => ({
+        ok: true,
+        status: 200,
+        text: JSON.stringify({
+          answers: { summarize: { type: "noul", noul } },
+        }),
+      }),
+    })),
+  ];
+  for (const options of cases) {
+    const s = session({ envText: "TYPESAFE_API_KEY=test-key", ...options });
+    await s.start("answer");
+    await s.complete("answer");
+    await s.flush();
+    assert.equal(s.prompts.length, 0);
+    assert.ok(!s.logs.join(" ").includes("test-key"));
+    assert.ok(!s.logs.join(" ").includes("secret server details"));
+  }
+});
+
+test("a timed-out Jev request cannot send a late follow-up", async () => {
+  let finish;
+  const s = session({
+    envText: "TYPESAFE_API_KEY=test-key",
+    fetchResponse: () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  });
+  await s.start("answer");
+  await s.complete("answer");
+  const pending = s.flush();
+  for (let i = 0; !finish && i < 20; i++)
+    await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(finish);
+  s.expire();
+  await pending;
+  assert.equal(s.prompts.length, 0);
+  assert.equal(s.logs.length, 1);
+  finish({
+    ok: true,
+    status: 200,
+    text: JSON.stringify({ answers: { summarize: { type: "noul", noul: 1 } } }),
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(s.prompts.length, 0);
+});
+
+test("quoted Jev configuration with trailing comments sends unquoted credentials and model", async () => {
+  const s = session({
+    envText:
+      "export TYPESAFE_API_KEY=\"test-key\" # account key\nTYPESAFE_MODEL='jev-latest' # default model",
+  });
+  await s.start("answer");
+  await s.complete("answer");
+  await s.flush();
+  assert.equal(s.requests.length, 1);
+  assert.equal(s.requests[0].headers.Authorization, "Bearer test-key");
+  assert.equal(JSON.parse(s.requests[0].body).model, "jev-latest");
 });
